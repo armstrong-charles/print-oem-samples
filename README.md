@@ -1,4 +1,5 @@
 # Writing print workflow apps and migrating WSDAs to UWP
+Project uses Windows 10 SDK Ver 10.0.16299.91
 
 This sample shows OEM print partners how to use the Print Workflow feature and migrate their existing Windows Store Device Apps (WSDAs) code to the Universal Windows Platform. 
 
