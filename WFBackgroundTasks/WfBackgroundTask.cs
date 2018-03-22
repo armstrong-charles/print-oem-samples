@@ -1,4 +1,5 @@
-﻿// Copyright(c) Microsoft Corporation.All rights reserved.
+﻿// #define PRINT_TICKET_TEST 
+// Copyright(c) Microsoft Corporation.All rights reserved.
 //
 //   THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 //   ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO
@@ -25,6 +26,7 @@ using System;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.Background;
 using Windows.Foundation;
+using Windows.Graphics.Printing.PrintTicket;
 using Windows.Graphics.Printing.Workflow;
 using Windows.UI.Notifications;
 using WorkflowAndWSDACombinedSample;
@@ -82,7 +84,8 @@ namespace WFBackgroundTasks
                 sessionManager.SetupRequested += OnSetupRequested;
 
                 // XPS OM printing scenario
-                sessionManager.Submitted += OnXpsOMPrintSubmitted;
+                // sessionManager.Submitted += OnXpsOMPrintSubmitted;
+                sessionManager.Submitted += OnXpsOMPrintSubmittedAsync;
 
                 // Tell the event source that it can start
                 // This call blocks until all the workflow callbacks complete
@@ -111,6 +114,7 @@ namespace WFBackgroundTasks
         /// <param name="printTaskSetupArgs">Has the Configuration, which include the PrintTicket, and other information</param>
         private void OnSetupRequested(PrintWorkflowBackgroundSession sessionManager, PrintWorkflowBackgroundSetupRequestedEventArgs printTaskSetupArgs)
         {
+            System.Diagnostics.Debug.WriteLine("Sample::WfBackgroundTask::OnSetupRequested-Enters");
             // Request a deferral if any of the calls here might result in an Async method being called 
             Deferral setupRequestedDeferral = printTaskSetupArgs.GetDeferral();
 
@@ -130,6 +134,7 @@ namespace WFBackgroundTasks
                 // Set storage prefix so that foreground and background can pass properties
                 string localStorageVariablePrefix = string.Format("{0}::", sessionId.Substring(0, 8));
                 localStorage.SetStorageKeyPrefix(localStorageVariablePrefix);
+
             }
             else
             {
@@ -226,6 +231,124 @@ namespace WFBackgroundTasks
                 // Complete the deferral taken out at the start of Run()
                 runDeferral.Complete();
             }
+        }
+
+        private async void OnXpsOMPrintSubmittedAsync(PrintWorkflowBackgroundSession sessionManager, PrintWorkflowSubmittedEventArgs printTaskSubmittedArgs)
+        {
+            System.Diagnostics.Debug.WriteLine("Sample::WfBackgroundTask::OnXpsOMPrintSubmittedAsync-Enters");
+            // Take out a deferral whilst the OM generation happens
+            Deferral submittedDeferral = printTaskSubmittedArgs.GetDeferral();
+
+            // Send a toast
+            UtilitiesLibrary.SendToastNotification("Background Print Workflow printing started for " + printTaskSubmittedArgs.Operation.Configuration.JobTitle, null);
+
+            // Get the source XPS OM content
+            PrintWorkflowObjectModelSourceFileContent xpsOMSourceContent = printTaskSubmittedArgs.Operation.XpsContent.GetSourceSpoolDataAsXpsObjectModel();
+
+            WorkflowPrintTicket ticket = null;
+#if PRINT_TICKET_TEST
+            // Both cases - Print ticket is not changed from WSDA context
+            // Send the print ticket if available to get the Target
+            if ( 
+                printTaskSubmittedArgs != null 
+                && printTaskSubmittedArgs.Operation != null 
+                && printTaskSubmittedArgs.Operation.XpsContent != null)
+            { 
+                ticket = await printTaskSubmittedArgs.Operation.XpsContent.GetJobPrintTicketAsync();
+            
+                if (ticket != null && ticket.XmlNode != null)
+                {
+                    System.Diagnostics.Debug.WriteLine("Sample::WfBackgroundTask::OnXpsOMPrintSubmitted:: args.Operation.XpsContent.GetJobPrintTicketAsync Content: \n" + ticket.XmlNode.GetXml());
+                }
+            }
+#endif
+            PrintWorkflowTarget target = printTaskSubmittedArgs.GetTarget(ticket);
+            if( ticket == null )
+            {
+                if (
+                printTaskSubmittedArgs != null
+                && printTaskSubmittedArgs.Operation != null
+                && printTaskSubmittedArgs.Operation.XpsContent != null)
+                {
+                    ticket = await printTaskSubmittedArgs.Operation.XpsContent.GetJobPrintTicketAsync();
+
+                    if (ticket != null && ticket.XmlNode != null)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Args.Operation.XpsContent.GetJobPrintTicketAsync Content: \n" + ticket.XmlNode.GetXml());
+                    }
+                }
+            }
+            // Get the Target Package
+            PrintWorkflowObjectModelTargetPackage targetPackage = target.TargetAsXpsObjectModelPackage;
+
+            // Create a Windows Runtime XPS Receiver callback object via the XpsOMRuntimeComponent, which implements
+            // the IPrintWorkflowXpsReceiver interface and PrintWorkflowObjectModelSourceFileContentNative. It is in the
+            // IPrintWorkflowXpsReceiver implementation that the output is actually modified
+            var xpsReceiver = new PrintWorkflowObjectModelSourceFileContentNative(xpsOMSourceContent, targetPackage);
+
+            // Signal for the XPS OM Generation
+            PrintWorkflowSubmittedStatus submittedStatus = PrintWorkflowSubmittedStatus.Failed;
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("Sample::WfBackgroundTask::OnXpsOMPrintSubmitted- GetJobPrintTicketAsync");
+                
+                // Get the watermark text and pass that to the xpsReceiver
+                string watermarkText = localStorage.GetWatermarkTextFromLocalStorage();
+                if (!suppressUI)
+                {
+                    // Delete the local storage setting if this is in a Workflow session context and not a standalone run of the app
+                    localStorage.DeleteWatermarkTextFromLocalStorage();
+                }
+
+                xpsReceiver.SetWatermarkText(watermarkText);
+
+                // Get the image file information, if set, and pass that to the xpsReceiver
+                localStorage.GetImagePropertiesFromLocalStorage(out string imageFile, out double dpiX, out double dpiY, out int imageWidth, out int imageHeight);
+                if (imageFile != null)
+                {
+                    xpsReceiver.SetImageProperties(imageFile, dpiX, dpiY, imageWidth, imageHeight);
+                    if (!suppressUI)
+                    {
+                        localStorage.DeleteImagePropertiesFromLocalStorage();
+                    }
+                }
+
+                // Start the OM generation
+                xpsReceiver.StartXpsOMGeneration();
+                // At this point, the xpsReceiver will receive callbacks when the XPS OM objects are available
+                // Wait till the Whole XPS OM is generated and written to the package writer
+                if (xpsReceiver.WaitForOMGeneration())
+                {
+                    UtilitiesLibrary.SendToastNotification("Background Print Workflow printing successfully completed for " + printTaskSubmittedArgs.Operation.Configuration.JobTitle, null);
+                    submittedStatus = PrintWorkflowSubmittedStatus.Succeeded;
+                }
+                else
+                {
+                    UtilitiesLibrary.SendToastNotification("Background Print Workflow printing failed for " + printTaskSubmittedArgs.Operation.Configuration.JobTitle, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Sample::WfBackgroundTask::OnXpsOMPrintSubmitted-catch");
+                string errorMessage = ex.Message;
+                UtilitiesLibrary.SendToastNotification("Background Print Workflow printing encountered an exception: " + errorMessage, null);
+                System.Diagnostics.Debug.WriteLine(
+                       "Sample::WfBackgroundTask::OnXpsOMPrintSubmitted-Exception: " + errorMessage);
+
+            }
+            finally
+            {
+                System.Diagnostics.Debug.WriteLine("Sample::WfBackgroundTask::OnXpsOMPrintSubmitted-Finally Block");
+                // All done, let the controller whether it should close the job stream or abort it
+                printTaskSubmittedArgs.Operation.Complete(submittedStatus);
+
+                // Complete the deferral taken out at the start of this function
+                submittedDeferral.Complete();
+
+                // Complete the deferral taken out at the start of Run()
+                runDeferral.Complete();
+            }
+            System.Diagnostics.Debug.WriteLine("Sample::WfBackgroundTask::OnXpsOMPrintSubmittedAsync-Leaves");
         }
 
         /// <summary>

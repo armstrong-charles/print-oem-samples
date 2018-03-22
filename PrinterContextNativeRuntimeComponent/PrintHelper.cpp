@@ -431,14 +431,20 @@ namespace PrinterContextNativeRuntimeComponent
             */
             Boolean PrintHelperClass::HasTicket()
             {
+				
                 if (m_ticket)
                 {
                     return true;
                 }
-
+				
                 // If the PrinterExtensionContextType is PrinterExtensionContextNativeType then the ticket is unavailable through here
                 // and the developer should be using the WInRT Print Ticket library
-                if (!m_context || m_initializationType == InitializationType::PrinterExtensionContextType)
+				
+				// if (!m_context || m_initializationType == InitializationType::PrinterExtensionContextType) 
+				// I agree,  the ticket is not available thru here for WFA context, but should be available for WSDA context
+				// Code logic should be changed!
+				// - Charles (03/22/2018)
+				if (!m_context || m_initializationType == InitializationType::PrinterExtensionContextNativeType)
                 {
                     return false;
                 }

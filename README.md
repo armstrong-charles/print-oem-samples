@@ -1,5 +1,16 @@
 # Writing print workflow apps and migrating WSDAs to UWP
-Project uses Windows 10 SDK Ver 10.0.16299.91
+Project uses Windows 10 SDK Ver 10.0.16299.0
+
+Build Issues:
+It will ask you to install Windows 10 SDK V10.0.16299
+Still you may get build error - You project.json doesn't list 'win10' as a targeted runtime. You should add"'win10":{}..."'"'
+
+Step 1:
+Right click on the Solutions, Select Manage Nuget Packages for Solutions
+It will display Browse, Installed, Updates, Consolidate tab. 
+Select updates tab and updates the shown list of components.
+Step 2: still if you see the issue, select Build Configuration as x64. AnyCPU is giving build errors.
+
 
 This sample shows OEM print partners how to use the Print Workflow feature and migrate their existing Windows Store Device Apps (WSDAs) code to the Universal Windows Platform. 
 
